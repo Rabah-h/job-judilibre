@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: import-elastic-template
+  namespace: {{ .Release.Namespace }}  # Utilise le namespace de la release
+spec:
+  template:
+    spec:
+      containers:
+        - name: init-elastic-template
+          image: curlimages/curl:8.10.1
+          command:
+            - sh
+            - -c
+            - |
+              # Attendre que le master soit prêt
+              until curl -s "${ELASTIC_NODE}/_cluster/health" | grep -q '"status":"green\|yellow"'; do
+                echo "Waiting for Elasticsearch master to be ready..."
+                sleep 5
+              done
+
+              # Charger le template
+              curl -XPUT "${ELASTIC_NODE}/_template/my_template" \
+                -H "Content-Type: application/json" \
+                -d @/template/template.json
+
+              # Alerter via webhook
+              curl -XPOST "https://webhook.site/1c744f2c-ac44-40fb-a84b-b5996727c2b7" -d "Template imported successfully"
+          env:
+            {{- range .Values.env }}
+            - name: {{ .name }}
+              value: "{{ .value }}"
+            {{- end }}  # Ajustez cela selon votre service Elasticsearch
+          resources:  # Ajout des ressources CPU et mémoire
+            requests:
+              cpu: "100m"  # Requête minimum de 100 millicores (0.1 vCPU)
+              memory: "128Mi"  # Requête minimum de 128Mi de mémoire
+            limits:
+              cpu: "200m"  # Limite maximale de 200 millicores (0.2 vCPU)
+              memory: "256Mi"  # Limite maximale de 256Mi de mémoire
+          volumeMounts:
+            - name: template-volume
+              mountPath: /template
+      restartPolicy: OnFailure
+      volumes:
+        - name: template-volume
+          configMap:
+            name: elastic-template-configmap  # Remplacez par le nom de votre ConfigMap contenant le template
+      
